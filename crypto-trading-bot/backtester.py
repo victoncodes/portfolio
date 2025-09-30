@@ -21,10 +21,7 @@ class Trade:
 def fetch_history(limit: int = 1000) -> pd.DataFrame:
     exchange_class = getattr(ccxt, EXCHANGE_ID)
     exchange = exchange_class({"enableRateLimit": True, "options": {"defaultType": "swap"}})
-    try:
-        ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe=TIMEFRAME, limit=limit)
-    finally:
-        exchange.close()
+    ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe=TIMEFRAME, limit=limit)
     df = pd.DataFrame(ohlcv, columns=["time", "open", "high", "low", "close", "volume"])
     df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
     return df
