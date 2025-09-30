@@ -19,7 +19,12 @@ API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE", "your_passphrase")
 SYMBOL = os.getenv("SYMBOL", "AVAX/USDT:USDT")  # Backward-compat for single symbol
 SYMBOLS = [s.strip() for s in os.getenv("SYMBOLS", SYMBOL).split(",") if s.strip()]
 LEVERAGE = int(os.getenv("LEVERAGE", "25"))
+# Legacy TIMEFRAME kept but not used by MTF; scheduler aligns to ENTRY_TIMEFRAME
 TIMEFRAME = os.getenv("TIMEFRAME", "15m")
+BIAS_TIMEFRAME = os.getenv("BIAS_TIMEFRAME", "1h")
+ZONE_TIMEFRAME = os.getenv("ZONE_TIMEFRAME", "15m")
+CONFIRM_TIMEFRAME = os.getenv("CONFIRM_TIMEFRAME", "5m")
+ENTRY_TIMEFRAME = os.getenv("ENTRY_TIMEFRAME", "1m")
 EXCHANGE_ID = os.getenv("EXCHANGE_ID", "bitget")
 
 
@@ -42,6 +47,11 @@ USE_EMA_CONFIRMATION = os.getenv("USE_EMA_CONFIRMATION", "false").lower() == "tr
 # Exchange-native conditional orders can be added later; in-bot is more portable.
 USE_IN_BOT_BRACKETS = os.getenv("USE_IN_BOT_BRACKETS", "true").lower() == "true"
 STATE_FILE = os.getenv("STATE_FILE", os.path.join(LOG_DIR, "state.json"))
+
+
+# --- Zones/MTF tuning ---
+ZONE_LOOKBACK = int(os.getenv("ZONE_LOOKBACK", "50"))  # bars on 15m
+ZONE_PROXIMITY = float(os.getenv("ZONE_PROXIMITY", "0.003"))  # 0.3% proximity to zone
 
 
 # --- Logging ---

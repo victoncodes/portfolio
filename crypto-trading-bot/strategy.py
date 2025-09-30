@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from ta.momentum import RSIIndicator
 
-from config import RSI_PERIOD, EMA_FAST, EMA_SLOW, USE_EMA_CONFIRMATION
+from config import RSI_PERIOD, EMA_FAST, EMA_SLOW, USE_EMA_CONFIRMATION, ZONE_LOOKBACK, ZONE_PROXIMITY
 
 
 Signal = Literal["long", "short", "hold"]
@@ -51,4 +51,43 @@ def rsi_strategy(df: pd.DataFrame) -> StrategyOutput:
             signal = "hold"
 
     return StrategyOutput(signal=signal, rsi=rsi_value, ema_fast=ema_fast_val, ema_slow=ema_slow_val)
+
+
+# --- MTF helpers ---
+def compute_bias_1h(df_1h: pd.DataFrame) -> str:
+    if df_1h is None or df_1h.empty:
+        return "neutral"
+    ema_fast = df_1h["close"].ewm(span=EMA_FAST, adjust=False).mean().iloc[-1]
+    ema_slow = df_1h["close"].ewm(span=EMA_SLOW, adjust=False).mean().iloc[-1]
+    if ema_fast > ema_slow:
+        return "bullish"
+    if ema_fast < ema_slow:
+        return "bearish"
+    return "neutral"
+
+
+def find_zones_15m(df_15m: pd.DataFrame) -> dict:
+    df = df_15m.tail(max(ZONE_LOOKBACK, 5))
+    swing_high = df["high"].max()
+    swing_low = df["low"].min()
+    return {"resistance": float(swing_high), "support": float(swing_low)}
+
+
+def confirm_5m(df_5m: pd.DataFrame, bias: str, zones: dict, last_price: float) -> str:
+    # proximity filter
+    prox = ZONE_PROXIMITY
+    res = zones["resistance"]
+    sup = zones["support"]
+
+    near_res = abs(last_price - res) / res <= prox
+    near_sup = abs(last_price - sup) / sup <= prox
+
+    rsi = RSIIndicator(close=df_5m["close"], window=RSI_PERIOD).rsi().iloc[-1]
+
+    if bias == "bullish" and near_sup and rsi < 40:
+        return "long"
+    if bias == "bearish" and near_res and rsi > 60:
+        return "short"
+    return "hold"
+
 

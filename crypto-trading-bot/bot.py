@@ -22,7 +22,7 @@ from config import (
     TAKE_PROFIT,
     USE_IN_BOT_BRACKETS,
 )
-from strategy import rsi_strategy
+from strategy import rsi_strategy, compute_bias_1h, find_zones_15m, confirm_5m
 from utils import notify_telegram, position_size_from_risk, setup_logging, load_state, save_state
 
 
@@ -152,13 +152,21 @@ def place_brackets_state(symbol: str, side: str, entry_price: float) -> None:
 
 
 def run_once_symbol(exchange: ccxt.Exchange, symbol: str) -> None:
-    df = fetch_candles(exchange, symbol, TIMEFRAME)
-    sig = rsi_strategy(df)
+    # Fetch multi-timeframe data
+    df_1h = fetch_candles(exchange, symbol, "1h")
+    df_15m = fetch_candles(exchange, symbol, "15m")
+    df_5m = fetch_candles(exchange, symbol, "5m")
+    df_1m = fetch_candles(exchange, symbol, "1m")
+
+    bias = compute_bias_1h(df_1h)
+    zones = find_zones_15m(df_15m)
+    market_price = float(df_1m.iloc[-1]["close"]) if not df_1m.empty else get_market_price(exchange, symbol)
+    conf = confirm_5m(df_5m, bias, zones, market_price)
+
     logger.info(
-        f"{symbol} => Signal: {sig.signal} | RSI: {sig.rsi:.2f} | EMAfast: {sig.ema_fast} | EMAslow: {sig.ema_slow}"
+        f"{symbol} => bias={bias} zones={zones} confirm={conf} price={market_price:.4f}"
     )
 
-    market_price = get_market_price(exchange, symbol)
     amount = position_size_from_risk(CAPITAL, RISK_PER_TRADE, STOP_LOSS, market_price)
 
     markets = exchange.load_markets()
@@ -190,14 +198,15 @@ def run_once_symbol(exchange: ccxt.Exchange, symbol: str) -> None:
     pos = positions.get(symbol)
     current_side = pos.get("side") if pos else None
 
-    if sig.signal == "long":
+    # Entry on 1m based on 5m confirmation respecting 1h bias and 15m zones
+    if conf == "long":
         if current_side == "short":
             close_position(exchange, symbol)
         if float(amount) > 0:
             order = open_long(exchange, symbol, float(amount))
             if order and USE_IN_BOT_BRACKETS:
                 place_brackets_state(symbol, "long", market_price)
-    elif sig.signal == "short":
+    elif conf == "short":
         if current_side == "long":
             close_position(exchange, symbol)
         if float(amount) > 0:
@@ -205,7 +214,7 @@ def run_once_symbol(exchange: ccxt.Exchange, symbol: str) -> None:
             if order and USE_IN_BOT_BRACKETS:
                 place_brackets_state(symbol, "short", market_price)
     else:
-        logger.info(f"{symbol} => Hold: no trade this interval.")
+        logger.info(f"{symbol} => Hold: awaiting confirmation.")
 
 
 def main_loop() -> None:
@@ -242,8 +251,9 @@ def main_loop() -> None:
 
         while True:
             try:
-                sleep_s = seconds_until_next_candle(TIMEFRAME)
-                logger.info(f"Sleeping {sleep_s}s until next {TIMEFRAME} candle...")
+                # Align to 1m for entry timeframe cadence
+                sleep_s = seconds_until_next_candle("1m")
+                logger.info(f"Sleeping {sleep_s}s until next 1m candle...")
                 time.sleep(max(sleep_s, 10))
                 for sym in SYMBOLS:
                     try:
