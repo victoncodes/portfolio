@@ -13,15 +13,17 @@ from config import (
     API_PASSPHRASE,
     EXCHANGE_ID,
     SYMBOL,
+    SYMBOLS,
     TIMEFRAME,
     LEVERAGE,
     CAPITAL,
     RISK_PER_TRADE,
     STOP_LOSS,
     TAKE_PROFIT,
+    USE_IN_BOT_BRACKETS,
 )
 from strategy import rsi_strategy
-from utils import notify_telegram, position_size_from_risk, setup_logging
+from utils import notify_telegram, position_size_from_risk, setup_logging, load_state, save_state
 
 
 logger = setup_logging()
@@ -70,9 +72,18 @@ def get_market_price(exchange: ccxt.Exchange, symbol: str) -> float:
 
 def get_positions_map(exchange: ccxt.Exchange, symbol: str) -> Dict[str, Any]:
     try:
-        positions = exchange.fetch_positions([symbol])
+        positions = exchange.fetch_positions(
+            [symbol], {"marginCoin": "USDT", "productType": "USDT-FUTURES"}
+        )
+    except ccxt.PermissionDenied:
+        logger.warning("No position read permission; assuming no open positions.")
+        return {}
     except Exception:
-        positions = exchange.fetch_positions()
+        try:
+            positions = exchange.fetch_positions({"marginCoin": "USDT", "productType": "USDT-FUTURES"})
+        except Exception as e:
+            logger.warning(f"Failed to fetch positions: {e}")
+            return {}
     by_symbol = {p.get("symbol"): p for p in positions if p.get("symbol") == symbol}
     return by_symbol
 
@@ -125,53 +136,76 @@ def open_short(exchange: ccxt.Exchange, symbol: str, amount: float) -> Optional[
         return None
 
 
-def place_brackets(exchange: ccxt.Exchange, symbol: str, side: str, entry_price: float) -> None:
-    try:
-        # On many futures exchanges we can emulate TP/SL with conditional orders; here we keep it simple.
-        tp_price = entry_price * (1 + TAKE_PROFIT) if side == "long" else entry_price * (1 - TAKE_PROFIT)
-        sl_price = entry_price * (1 - STOP_LOSS) if side == "long" else entry_price * (1 + STOP_LOSS)
-        logger.info(f"Bracket targets -> TP: {tp_price:.4f}, SL: {sl_price:.4f}")
-        # Optionally, implement exchange-specific conditional orders here using exchange.create_order with params.
-    except Exception as e:
-        logger.warning(f"Failed to place bracket orders: {e}")
+def place_brackets_state(symbol: str, side: str, entry_price: float) -> None:
+    tp_price = entry_price * (1 + TAKE_PROFIT) if side == "long" else entry_price * (1 - TAKE_PROFIT)
+    sl_price = entry_price * (1 - STOP_LOSS) if side == "long" else entry_price * (1 + STOP_LOSS)
+    logger.info(f"Bracket targets -> TP: {tp_price:.4f}, SL: {sl_price:.4f}")
+    state = load_state()
+    state.setdefault("positions", {})
+    state["positions"][symbol] = {
+        "side": side,
+        "entry": entry_price,
+        "tp": tp_price,
+        "sl": sl_price,
+    }
+    save_state(state)
 
 
-def run_once(exchange: ccxt.Exchange) -> None:
-    df = fetch_candles(exchange, SYMBOL, TIMEFRAME)
+def run_once_symbol(exchange: ccxt.Exchange, symbol: str) -> None:
+    df = fetch_candles(exchange, symbol, TIMEFRAME)
     sig = rsi_strategy(df)
     logger.info(
-        f"Signal: {sig.signal} | RSI: {sig.rsi:.2f} | EMAfast: {sig.ema_fast} | EMAslow: {sig.ema_slow}"
+        f"{symbol} => Signal: {sig.signal} | RSI: {sig.rsi:.2f} | EMAfast: {sig.ema_fast} | EMAslow: {sig.ema_slow}"
     )
 
-    market_price = get_market_price(exchange, SYMBOL)
+    market_price = get_market_price(exchange, symbol)
     amount = position_size_from_risk(CAPITAL, RISK_PER_TRADE, STOP_LOSS, market_price)
 
-    # Round to exchange precision
     markets = exchange.load_markets()
-    market = markets[SYMBOL]
-    amount = exchange.amount_to_precision(SYMBOL, amount)
+    amount = exchange.amount_to_precision(symbol, amount)
 
-    # Close opposite positions before opening a new one
-    positions = get_positions_map(exchange, SYMBOL)
-    pos = positions.get(SYMBOL)
+    # Check in-bot bracket exits first
+    if USE_IN_BOT_BRACKETS:
+        state = load_state()
+        pos_state = (state.get("positions") or {}).get(symbol)
+        if pos_state:
+            side = pos_state.get("side")
+            tp = float(pos_state.get("tp"))
+            sl = float(pos_state.get("sl"))
+            if side == "long" and (market_price >= tp or market_price <= sl):
+                logger.info(f"{symbol} Long bracket hit @ {market_price:.4f}; closing.")
+                close_position(exchange, symbol)
+                state["positions"].pop(symbol, None)
+                save_state(state)
+                return
+            if side == "short" and (market_price <= tp or market_price >= sl):
+                logger.info(f"{symbol} Short bracket hit @ {market_price:.4f}; closing.")
+                close_position(exchange, symbol)
+                state["positions"].pop(symbol, None)
+                save_state(state)
+                return
+
+    # Position from exchange (if permission allowed)
+    positions = get_positions_map(exchange, symbol)
+    pos = positions.get(symbol)
     current_side = pos.get("side") if pos else None
 
     if sig.signal == "long":
         if current_side == "short":
-            close_position(exchange, SYMBOL)
+            close_position(exchange, symbol)
         if float(amount) > 0:
-            order = open_long(exchange, SYMBOL, float(amount))
-            if order:
-                place_brackets(exchange, SYMBOL, "long", market_price)
+            order = open_long(exchange, symbol, float(amount))
+            if order and USE_IN_BOT_BRACKETS:
+                place_brackets_state(symbol, "long", market_price)
     elif sig.signal == "short":
         if current_side == "long":
-            close_position(exchange, SYMBOL)
+            close_position(exchange, symbol)
         if float(amount) > 0:
-            order = open_short(exchange, SYMBOL, float(amount))
-            if order:
-                place_brackets(exchange, SYMBOL, "short", market_price)
+            order = open_short(exchange, symbol, float(amount))
+            if order and USE_IN_BOT_BRACKETS:
+                place_brackets_state(symbol, "short", market_price)
     else:
-        logger.info("Hold: no trade this interval.")
+        logger.info(f"{symbol} => Hold: no trade this interval.")
 
 
 def main_loop() -> None:
@@ -201,7 +235,8 @@ def main_loop() -> None:
 
         # Run once immediately, then align to candle boundaries
         try:
-            run_once(exchange)
+            for sym in SYMBOLS:
+                run_once_symbol(exchange, sym)
         except Exception as e:
             logger.exception(f"Error on initial run: {e}")
 
@@ -210,7 +245,11 @@ def main_loop() -> None:
                 sleep_s = seconds_until_next_candle(TIMEFRAME)
                 logger.info(f"Sleeping {sleep_s}s until next {TIMEFRAME} candle...")
                 time.sleep(max(sleep_s, 10))
-                run_once(exchange)
+                for sym in SYMBOLS:
+                    try:
+                        run_once_symbol(exchange, sym)
+                    except Exception as e:
+                        logger.exception(f"Error processing {sym}: {e}")
             except ccxt.InsufficientFunds as e:
                 logger.error(f"Insufficient funds: {e}")
                 notify_telegram("Insufficient funds error")

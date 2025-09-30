@@ -16,7 +16,8 @@ API_PASSPHRASE = os.getenv("BITGET_API_PASSPHRASE", "your_passphrase")
 
 
 # --- Trading configuration ---
-SYMBOL = os.getenv("SYMBOL", "AVAX/USDT:USDT")  # Futures contract symbol (USDT-margined)
+SYMBOL = os.getenv("SYMBOL", "AVAX/USDT:USDT")  # Backward-compat for single symbol
+SYMBOLS = [s.strip() for s in os.getenv("SYMBOLS", SYMBOL).split(",") if s.strip()]
 LEVERAGE = int(os.getenv("LEVERAGE", "25"))
 TIMEFRAME = os.getenv("TIMEFRAME", "15m")
 EXCHANGE_ID = os.getenv("EXCHANGE_ID", "bitget")
@@ -34,6 +35,13 @@ RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 EMA_FAST = int(os.getenv("EMA_FAST", "21"))
 EMA_SLOW = int(os.getenv("EMA_SLOW", "55"))
 USE_EMA_CONFIRMATION = os.getenv("USE_EMA_CONFIRMATION", "false").lower() == "true"
+
+
+# --- Bracket management ---
+# If true, attempts to manage SL/TP in-bot (monitor price and close on triggers).
+# Exchange-native conditional orders can be added later; in-bot is more portable.
+USE_IN_BOT_BRACKETS = os.getenv("USE_IN_BOT_BRACKETS", "true").lower() == "true"
+STATE_FILE = os.getenv("STATE_FILE", os.path.join(LOG_DIR, "state.json"))
 
 
 # --- Logging ---

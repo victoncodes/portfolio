@@ -8,7 +8,7 @@ import requests
 from rich.console import Console
 from rich.logging import RichHandler
 
-from config import LOG_DIR, LOG_FILE, LOG_LEVEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import LOG_DIR, LOG_FILE, LOG_LEVEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, STATE_FILE
 
 
 _console = Console()
@@ -84,4 +84,27 @@ def position_size_from_risk(capital_usdt: float, risk_fraction: float, stop_loss
     position_notional = risk_usdt / price_move_to_stop
     base_amount = position_notional / max(entry_price, 1e-9)
     return max(base_amount, 0.0)
+
+
+# --- Simple JSON state persistence for bracket mgmt across restarts ---
+import json
+
+
+def load_state() -> dict:
+    try:
+        if os.path.isfile(STATE_FILE):
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_state(state: dict) -> None:
+    try:
+        ensure_log_dir_exists()
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+    except Exception:
+        pass
 
