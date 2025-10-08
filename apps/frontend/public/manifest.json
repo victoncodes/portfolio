@@ -5,6 +5,23 @@
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#22c55e",
+  "categories": ["finance", "education", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Add Transaction",
+      "short_name": "Add",
+      "description": "Quickly add an income or expense",
+      "url": "/dashboard?quick=add",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "My Goals",
+      "short_name": "Goals",
+      "description": "View and update savings goals",
+      "url": "/dashboard#goals",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/icons/icon-192.png",
