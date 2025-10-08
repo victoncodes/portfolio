@@ -1,0 +1,182 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  passwordHash  String   @map("password_hash")
+  role          Role     @default(STUDENT)
+  profileMeta   Json?    @map("profile_meta")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  transactions  Transaction[]
+  goals         Goal[]
+  progress      Progress[]
+  courses       Course[] @relation("CourseInstructor")
+  adminLogs     AdminLog[]
+
+  @@map("users")
+}
+
+model Transaction {
+  id        String          @id @default(cuid())
+  userId    String          @map("user_id")
+  type      TransactionType
+  amount    Int             // Amount in cents
+  category  String
+  date      DateTime
+  notes     String?
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+model Goal {
+  id           String     @id @default(cuid())
+  userId       String     @map("user_id")
+  title        String
+  targetAmount Int        @map("target_amount") // Amount in cents
+  savedAmount  Int        @default(0) @map("saved_amount") // Amount in cents
+  deadline     DateTime?
+  status       GoalStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("goals")
+}
+
+model Course {
+  id           String   @id @default(cuid())
+  title        String
+  description  String
+  instructorId String   @map("instructor_id")
+  price        Int?     // Price in cents, null for free courses
+  published    Boolean  @default(false)
+  videoRefs    Json?    @map("video_refs") // Array of video URLs/IDs
+  thumbnail    String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  instructor User       @relation("CourseInstructor", fields: [instructorId], references: [id])
+  lessons    Lesson[]
+  progress   Progress[]
+
+  @@map("courses")
+}
+
+model Lesson {
+  id              String      @id @default(cuid())
+  courseId        String      @map("course_id")
+  title           String
+  contentType     ContentType @map("content_type")
+  contentRef      String      @map("content_ref") // URL or reference to content
+  unlockCondition Json?       @map("unlock_condition") // JSON conditions for unlocking
+  orderIndex      Int         @map("order_index") // Order within course
+  duration        Int?        // Duration in seconds for video lessons
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  course   Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  progress Progress[]
+
+  @@map("lessons")
+}
+
+model Progress {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  courseId        String    @map("course_id")
+  lessonId        String?   @map("lesson_id")
+  percentComplete Int       @default(0) @map("percent_complete") // 0-100
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lesson Lesson? @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId, lessonId])
+  @@map("progress")
+}
+
+model AdminLog {
+  id        String   @id @default(cuid())
+  adminId   String   @map("admin_id")
+  action    String
+  targetId  String?  @map("target_id") // ID of affected resource
+  metadata  Json?    // Additional action metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  admin User @relation(fields: [adminId], references: [id])
+
+  @@map("admin_logs")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  metadata  Json?            // Additional notification data
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+// Enums
+enum Role {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  SAVINGS
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+enum ContentType {
+  TEXT
+  VIDEO
+  INTERACTIVE
+}
+
+enum NotificationType {
+  GOAL_REMINDER
+  COURSE_UPDATE
+  ACHIEVEMENT
+  SYSTEM
+}
