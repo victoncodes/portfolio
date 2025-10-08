@@ -1,0 +1,10 @@
+{
+  "extends": "../../packages/tsconfig/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false
+  },
+  "include": ["src", "prisma"]
+}
